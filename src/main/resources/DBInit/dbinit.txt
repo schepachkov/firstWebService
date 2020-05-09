@@ -1,0 +1,172 @@
+CREATE DATABASE shop
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1;
+
+CREATE TABLE book(
+	id bigserial CONSTRAINT book_pk_id PRIMARY KEY,
+	name varchar(70) NOT NULL,
+	cost integer DEFAULT 0 CHECK(cost >= 0),
+	stock varchar(70) NOT NULL,
+	amount integer DEFAULT 0 CHECK(amount >= 0)
+);
+
+CREATE TABLE buyer(
+	id bigserial CONSTRAINT buyer_pk_id PRIMARY KEY,
+	surname varchar(70) NOT NULL,
+	area varchar(100) NOT NULL,
+	discount integer DEFAULT 0 CHECK(discount >= 0 AND discount < 100)
+);
+
+CREATE TABLE seller(
+	id bigserial CONSTRAINT seller_pk_id PRIMARY KEY,
+	name varchar(70) NOT NULL,
+	area varchar(100) NOT NULL,
+	commission integer DEFAULT 0 CHECK(commission >= 0 AND commission < 100)
+);
+
+CREATE TABLE purchase(
+	id bigserial CONSTRAINT purchase_pk_id PRIMARY KEY,
+	seller integer CONSTRAINT purchase_fk_seller REFERENCES seller(id) NOT NULL,
+	buyer integer CONSTRAINT purchase_fk_buyer REFERENCES buyer(id) NOT NULL,
+	book integer CONSTRAINT purchase_fk_book REFERENCES book(id) NOT NULL,
+	amount integer DEFAULT 0 CHECK (amount >= 0),
+	total numeric DEFAULT 0 CHECK(total >= 0),
+	date timestamp with time zone DEFAULT NOW()
+);
+
+
+insert into buyer(surname, area, discount) values('Иванов И.П.', 'Нижегородский', 0);
+insert into buyer(surname, area, discount) values('Петров К.В', 'Сормовский', 3);
+insert into buyer(surname, area, discount) values('Шилдт Г.', 'Автозаводский', 5);
+insert into buyer(surname, area, discount) values('Блох Дж.', 'Кузнечиха', 10);
+
+
+INSERT INTO book(name, cost, stock, amount) VALUES('clean code', 1500, 'stock_1', 30);
+INSERT INTO book(name, cost, stock, amount) VALUES('clean architecture', 1100, 'stock_1', 10);
+INSERT INTO book(name, cost, stock, amount) VALUES('grokking algorithms', 2500, 'stock_1', 27);
+INSERT INTO book(name, cost, stock, amount) VALUES('windows 10 for dummies', 700, 'stock_1', 7);
+INSERT INTO book(name, cost, stock, amount) VALUES('effective java', 800, 'stock_2', 5);
+INSERT INTO book(name, cost, stock, amount) VALUES('windows 7 for dummies', 550, 'stock_2', 4);
+INSERT INTO book(name, cost, stock, amount) VALUES('head frist java', 1000, 'stock_2', 5);
+INSERT INTO book(name, cost, stock, amount) VALUES('сборник анекдотов', 300, 'stock_2', 20);
+INSERT INTO book(name, cost, stock, amount) VALUES('java concurrency', 2000, 'stock_3', 5);
+INSERT INTO book(name, cost, stock, amount) VALUES('golden book', 20000, 'stock_3', 15);
+
+
+INSERT INTO seller(name, area, commission) VALUES('shop1', 'Сормовский', 17);
+INSERT INTO seller(name, area, commission) VALUES('shop2', 'Советский', 20);
+INSERT INTO seller(name, area, commission) VALUES('shop3', 'Автозаводский', 18);
+INSERT INTO seller(name, area, commission) VALUES('shop4', 'Нижегородский', 13);
+INSERT INTO seller(name, area, commission) VALUES('shop5', 'Кузнечиха', 7);
+
+
+create function calculate_total(pur_id bigint) returns numeric
+    language plpgsql
+as
+$$
+DECLARE
+    price bigint;
+    com numeric;
+    am bigint;
+    discount numeric;
+BEGIN
+    RETURN (SELECT round(b.cost *
+                         purchase.amount *
+                   ((1 + round(s.commission/100.0, 2))::varchar)::numeric *
+                   ((1 - round(buyer.discount/100.0, 2))::varchar)::numeric,2) AS res
+            FROM purchase INNER JOIN book b on purchase.book = b.id
+                          INNER JOIN buyer on purchase.buyer = buyer.id
+                          INNER JOIN seller s on purchase.seller = s.id
+            WHERE purchase.id = pur_id);
+END;
+$$;
+
+alter function calculate_total(bigint) owner to postgres;
+
+
+
+
+create function safe_delete(tab_name character varying, check_id bigint) returns boolean
+    language plpgsql
+as
+$$
+DECLARE
+
+ val integer;
+
+BEGIN
+	EXECUTE format('SELECT id FROM %s AS tab WHERE tab.id = %s', tab_name, check_id)
+	INTO val;
+
+	IF (val >= 0) THEN
+        EXECUTE format('DELETE FROM %s AS tab WHERE tab.id = %s', tab_name, check_id);
+	ELSE
+	    RETURN false;
+	END IF;
+
+	RETURN true;
+END;
+$$;
+
+alter function safe_delete(varchar, bigint) owner to postgres;
+
+
+===================Заполнение таблицы покупок=============
+
+Я заполнял ее через сваггер, метод POST
+
+{
+  "amount": 2,
+  "book": 1,
+  "buyer": 4,
+  "seller": 3
+}
+
+{
+  "amount": 4,
+  "book": 7,
+  "buyer": 2,
+  "seller": 1
+}
+
+{
+  "amount": 5,
+  "book": 4,
+  "buyer": 3,
+  "seller": 1
+}
+
+{
+  "amount": 5,
+  "book": 2,
+  "buyer": 2,
+  "seller": 4
+}
+
+{
+  "amount": 7,
+  "book": 7,
+  "buyer": 4,
+  "seller": 5
+}
+
+{
+  "amount": 4,
+  "book": 9,
+  "buyer": 3,
+  "id": 0,
+  "seller": 3,
+  "total": 0
+}
+
+Это примеры заполнения. Можно оставить аттрибуты id и total, но смысла от них не будет.
+Id- вычисляется автоматически, а total - высчитывается функцией.
+После совершения покупок, можно заметить, что количество книг на складах уменьшилось.
+При отмене заказа(DELETE) книги вернутся на склад.
+При редактировании заказа склад может пополнится или убавится в зависимоти от измененного количества
+или при изменении книги.
+При изменении покупателя будет пересчитан total;
+При изменении Магазина(seller) - будет так же пересчитан total.
+При изменении книги или ее количества total тоже изменится.
