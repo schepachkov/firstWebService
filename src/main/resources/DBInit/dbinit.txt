@@ -113,6 +113,29 @@ $$;
 alter function safe_delete(varchar, bigint) owner to postgres;
 
 
+
+create function can_insert_into_purchase(id_book bigint, amount bigint) returns boolean
+    language plpgsql
+as
+$$
+DECLARE
+
+	canTake bigint;
+
+BEGIN
+	canTake :=(SELECT book.amount FROM book WHERE book.id = id_book);
+	IF (canTake >= amount) THEN
+		RETURN true;
+	ELSE RETURN false;
+	END IF;
+END;
+$$;
+
+alter function can_insert_into_purchase(bigint, bigint) owner to postgres;
+
+
+
+
 ===================Заполнение таблицы покупок=============
 
 Я заполнял ее через сваггер, метод POST
